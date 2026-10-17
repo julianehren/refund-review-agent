@@ -1,0 +1,29 @@
+[project]
+name = "refund-review-agent"
+version = "1.0.0"
+description = "AI agent that reviews e-commerce refund requests using tool use, RAG and human-in-the-loop approval."
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+dependencies = [
+    "anthropic>=0.70",
+    "pydantic>=2.7",
+    "python-dotenv>=1.0",
+    "chromadb>=1.0",
+    "fastembed>=0.5",
+    "streamlit>=1.40",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8"]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]

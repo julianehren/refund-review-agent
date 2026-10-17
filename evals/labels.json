@@ -1,0 +1,98 @@
+{
+  "R-1001": {
+    "expected": "APPROVE",
+    "policy": "§2"
+  },
+  "R-1002": {
+    "expected": "REJECT",
+    "policy": "§3"
+  },
+  "R-1003": {
+    "expected": "APPROVE",
+    "policy": "§5"
+  },
+  "R-1004": {
+    "expected": "ESCALATE",
+    "policy": "§5"
+  },
+  "R-1005": {
+    "expected": "APPROVE",
+    "policy": "§6"
+  },
+  "R-1006": {
+    "expected": "ESCALATE",
+    "policy": "§6"
+  },
+  "R-1007": {
+    "expected": "APPROVE",
+    "policy": "§4"
+  },
+  "R-1008": {
+    "expected": "REJECT",
+    "policy": "§4"
+  },
+  "R-1009": {
+    "expected": "REJECT",
+    "policy": "§8"
+  },
+  "R-1010": {
+    "expected": "REJECT",
+    "policy": "§8"
+  },
+  "R-1011": {
+    "expected": "APPROVE",
+    "policy": "§5"
+  },
+  "R-1012": {
+    "expected": "APPROVE",
+    "policy": "§7"
+  },
+  "R-1013": {
+    "expected": "ESCALATE",
+    "policy": "§9"
+  },
+  "R-1014": {
+    "expected": "ESCALATE",
+    "policy": "§10"
+  },
+  "R-1015": {
+    "expected": "ESCALATE",
+    "policy": "§10"
+  },
+  "R-1016": {
+    "expected": "ESCALATE",
+    "policy": "§11"
+  },
+  "R-1017": {
+    "expected": "REJECT",
+    "policy": "§12"
+  },
+  "R-1018": {
+    "expected": "APPROVE",
+    "policy": "§2"
+  },
+  "R-1019": {
+    "expected": "REJECT",
+    "policy": "§3"
+  },
+  "R-1020": {
+    "expected": "ESCALATE",
+    "policy": "§5"
+  },
+  "R-1021": {
+    "expected": "APPROVE",
+    "policy": "§2"
+  },
+  "R-1022": {
+    "expected": "REJECT",
+    "policy": "§4"
+  },
+  "R-1023": {
+    "expected": "REJECT",
+    "policy": "§2"
+  },
+  "R-1024": {
+    "expected": "REJECT",
+    "policy": "§6"
+  }
+}

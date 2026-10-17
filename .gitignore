@@ -1,0 +1,22 @@
+# Secrets – never commit your API key
+.env
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+
+# Generated data (re-created by scripts)
+data/*.db
+.chroma/
+
+# Evaluation runs (only the summary report is committed)
+evals/results/*.json
+
+# IDEs / OS
+.idea/
+.vscode/
+.DS_Store
