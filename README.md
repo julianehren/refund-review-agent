@@ -44,10 +44,10 @@ flowchart LR
     API[REST API<br/>FastAPI] --> A
     S[Shop system / helpdesk] --> API
 
-    N8N[n8n workflow] -. planned .-> API
+    N8N[n8n workflow] --> API
+    N8N -- only on ESCALATE --> NT[🔔 Push notification<br/>ntfy]
     A -. planned .-> MCP[MCP server]
     style MCP stroke-dasharray: 5 5
-    style N8N stroke-dasharray: 5 5
 ```
 
 1. **Tool use (agentic loop).** Claude receives the request id and decides on its own which tools to call and in which order. The loop is written by hand on the Anthropic Messages API (no framework), so every step is transparent.
@@ -56,7 +56,8 @@ flowchart LR
 4. **Grounding check.** The agent may only cite policy sections it actually retrieved – otherwise the UI shows a warning and the evaluation counts it.
 5. **Human-in-the-loop.** The Streamlit UI shows recommendation, facts, cited rules, cost and the full tool trace. The reviewer accepts or overrides (overrides require a note); everything lands in an audit table.
 6. **REST API.** A FastAPI service offers the same workflow to other systems: list requests, let the agent review one, record the human decision, read the audit log.
-7. **Evaluation.** 24 synthetic cases, one per rule incl. edge cases (day 14 vs. day 15), with labels stored *outside* the database so the agent cannot see them.
+7. **Workflow automation (n8n).** A low-code workflow pulls open requests, has the agent review them via the API and notifies a human only when the agent escalates.
+8. **Evaluation.** 24 synthetic cases, one per rule incl. edge cases (day 14 vs. day 15), with labels stored *outside* the database so the agent cannot see them.
 
 ## What it shows
 
@@ -67,6 +68,7 @@ flowchart LR
 | Structured outputs & self-correction | [`models.py`](src/refund_agent/models.py), `submit_decision` in `agent.py` |
 | Human-in-the-loop, four-eyes principle, audit log | [`app/streamlit_app.py`](app/streamlit_app.py), [`decisions.py`](src/refund_agent/decisions.py) |
 | REST API / backend integration | [`api.py`](src/refund_agent/api.py) (FastAPI) |
+| Workflow automation / low-code | [n8n workflow](integrations/n8n/refund-review-escalation-alerts.json) |
 | LLM evaluation, KPIs, cost & latency tracking | [`evals/run_eval.py`](evals/run_eval.py) |
 | SQL data modelling with constraints | [`schema.sql`](src/refund_agent/schema.sql) |
 | Testing (no API key needed) & CI/CD | [`tests/`](tests), [GitHub Actions](.github/workflows/ci.yml) |
@@ -127,6 +129,21 @@ On Windows PowerShell use `curl.exe` instead of `curl`, or `Invoke-RestMethod`.
 
 The API adds no business logic of its own – it calls the same tools, agent and decision rules as the UI.
 
+## n8n workflow
+
+![n8n workflow: get open requests, AI agent review via the API, notify a human only on escalation](docs/n8n-workflow.png)
+
+The workflow in [`integrations/n8n/`](integrations/n8n/refund-review-escalation-alerts.json) connects the agent to a business process without writing code:
+
+1. **Get open requests** – `GET /requests` on the REST API
+2. **AI agent review** – `POST /reviews` for every request (n8n runs them in parallel)
+3. **Escalation?** – only `ESCALATE` decisions continue
+4. **Notify reviewer** – push notification via [ntfy](https://ntfy.sh) with summary, cited policies and cost
+
+Routine cases (APPROVE/REJECT) are not pushed: they wait in the review queue, so the human isn't flooded with alerts. The notification channel is a single node and can be swapped for Slack, Teams or e-mail.
+
+**Run it:** start the API (`uvicorn refund_agent.api:app`), start n8n (`npx n8n`), import the JSON file (*Workflows → Import from file*), replace `YOUR-NTFY-TOPIC` in the last node and click *Execute workflow*. The limit node keeps test runs small and cheap – remove it to review all open requests. Use `127.0.0.1` rather than `localhost` in n8n (Node.js may resolve `localhost` to IPv6, while uvicorn listens on IPv4).
+
 ## Project structure
 
 ```
@@ -141,6 +158,7 @@ src/refund_agent/
 ├── schema.sql      # SQLite schema
 └── config.py       # paths, model, prices, simulation date
 app/streamlit_app.py   # human-in-the-loop review UI
+integrations/n8n/      # n8n workflow (escalation alerts)
 evals/run_eval.py      # evaluation & report
 data/store_policy.md   # the refund policy (knowledge base)
 tests/                 # pytest suite with fake LLM client
@@ -156,11 +174,16 @@ tests/                 # pytest suite with fake LLM client
 - **Labels live outside the database** (`evals/labels.json`), so the agent can't access the expected answers.
 - **Synthetic data.** All customers, orders and rules are invented. The focus of this project is wiring the components into a working, measurable system – the policy could just as well have 1,000 pages.
 
+## Lessons learned
+
+- **Integration tests find what unit tests miss.** n8n sends requests in parallel. The first parallel requests each tried to open the vector database at the same time and failed with HTTP 500. The unit tests ran sequentially and never hit it. I reproduced it with six concurrent threads, fixed it with a lock so the index is built exactly once, and added a regression test ([v1.1.1](https://github.com/julianehren/refund-review-agent/releases)).
+- **Mocks have limits.** The tests use a fake Claude client, so a parameter the real API no longer accepted only surfaced when running against the real model. Both kinds of tests are needed.
+
 ## Roadmap
 
 - [x] **v1.0** – Tool-use agent, RAG over policy, structured output, human-in-the-loop UI, evaluation, tests, CI
 - [x] **v1.1** – REST API with FastAPI, so other systems can call the agent and record human decisions
-- [ ] **v1.2** – n8n workflow: incoming e-mail → agent review via the API → notification to the reviewer
+- [x] **v1.2** – n8n workflow: agent review via the API, push notification to the reviewer on escalation
 - [ ] **v1.3** – Photo check (multimodal): the agent inspects the customer's photo – is the damage really visible?
 - [ ] **v1.4** – MCP server exposing the same tools to Claude Desktop and other MCP clients
 - [ ] **v1.5** – Docker image and hosted demo

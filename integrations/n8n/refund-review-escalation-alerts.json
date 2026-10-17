@@ -1,0 +1,208 @@
+{
+  "name": "Refund Review – Escalation Alerts",
+  "nodes": [
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        -544,
+        0
+      ],
+      "name": "Start review run"
+    },
+    {
+      "parameters": {
+        "maxItems": 6
+      },
+      "type": "n8n-nodes-base.limit",
+      "typeVersion": 1,
+      "position": [
+        -96,
+        0
+      ],
+      "name": "Limit to 6 (testing only)"
+    },
+    {
+      "parameters": {
+        "url": "http://127.0.0.1:8000/requests",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [
+        -320,
+        0
+      ],
+      "name": "Get open requests (API)"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://127.0.0.1:8000/reviews",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "request_id",
+              "value": "={{ $json.id }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [
+        128,
+        0
+      ],
+      "name": "AI agent review (API)"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "c44f0bb9-bf7b-496e-8b80-6f8f1ea95d20",
+              "leftValue": "={{ $json.decision.decision }}",
+              "rightValue": "ESCALATE",
+              "operator": {
+                "type": "string",
+                "operation": "equals",
+                "name": "filter.operator.equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        352,
+        0
+      ],
+      "name": "Escalation?"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://ntfy.sh/YOUR-NTFY-TOPIC",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Title",
+              "value": "=Refund {{ $json.request_id }} needs your review"
+            },
+            {
+              "name": "Priority",
+              "value": "high"
+            },
+            {
+              "name": "Tags",
+              "value": "warning"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "text/plain",
+        "body": "={{ $json.decision.summary }}\n\nRecommendation: {{ $json.decision.decision }} | Policies: {{ $json.decision.cited_policies.join(', ') }} | Cost: ${{ $json.cost_usd }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [
+        576,
+        -96
+      ],
+      "name": "Notify reviewer (ntfy)"
+    },
+    {
+      "parameters": {
+        "content": "## Refund Review – Escalation Alerts\nFetches open refund requests, lets the AI agent review each one via the REST API, and notifies a human only when the agent escalates. Routine cases stay in the review queue.\n\n**Setup:** start the API (`uvicorn refund_agent.api:app`) and replace `YOUR-NTFY-TOPIC` in the last node.",
+        "height": 220,
+        "width": 520,
+        "color": 5
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -200,
+        -320
+      ],
+      "name": "About this workflow"
+    }
+  ],
+  "connections": {
+    "Start review run": {
+      "main": [
+        [
+          {
+            "node": "Get open requests (API)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Limit to 6 (testing only)": {
+      "main": [
+        [
+          {
+            "node": "AI agent review (API)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get open requests (API)": {
+      "main": [
+        [
+          {
+            "node": "Limit to 6 (testing only)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI agent review (API)": {
+      "main": [
+        [
+          {
+            "node": "Escalation?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Escalation?": {
+      "main": [
+        [
+          {
+            "node": "Notify reviewer (ntfy)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "pinData": {},
+  "tags": []
+}
