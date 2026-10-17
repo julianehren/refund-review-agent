@@ -87,3 +87,24 @@ def test_override_requires_note(client):
 
 def test_invalid_decision_value_is_rejected(client):
     assert client.post("/requests/R-1003/decision", json={"decision": "MAYBE"}).status_code == 422
+
+
+def test_policy_index_is_created_only_once_under_parallel_requests(monkeypatch):
+    """Regression test: n8n sends requests in parallel; the index must be built exactly once."""
+    import threading
+    import time
+    from concurrent.futures import ThreadPoolExecutor
+
+    created = []
+
+    class SlowIndex:
+        def __init__(self):
+            time.sleep(0.05)  # simulate slow model loading, so threads overlap
+            created.append(threading.get_ident())
+
+    monkeypatch.setattr(api, "PolicyIndex", SlowIndex)
+    monkeypatch.setattr(api, "_policy_index", None)
+    with ThreadPoolExecutor(6) as pool:
+        indexes = list(pool.map(lambda _: api.get_policy_index(), range(6)))
+    assert len(created) == 1
+    assert len({id(i) for i in indexes}) == 1

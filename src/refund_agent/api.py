@@ -19,6 +19,7 @@ without any knowledge of Streamlit or Claude.
 
 import os
 import sqlite3
+import threading
 from collections.abc import Iterator
 from functools import lru_cache
 from typing import Annotated, Literal
@@ -58,10 +59,22 @@ def get_db() -> Iterator[sqlite3.Connection]:
         conn.close()
 
 
-@lru_cache
+_policy_index: PolicyIndex | None = None
+_policy_index_lock = threading.Lock()
+
+
 def get_policy_index() -> PolicyIndex:
-    """Loaded once: the embedding model is too slow to load for every request."""
-    return PolicyIndex()
+    """Loaded once: the embedding model is too slow to load for every request.
+
+    The lock matters: n8n sends several requests at the same time. Without it,
+    each parallel first request would try to open the Chroma database at once,
+    which fails ("Could not connect to tenant default_tenant").
+    """
+    global _policy_index
+    with _policy_index_lock:
+        if _policy_index is None:
+            _policy_index = PolicyIndex()
+        return _policy_index
 
 
 @lru_cache
