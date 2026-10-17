@@ -1,0 +1,164 @@
+"""Evaluate the agent on all labelled cases and write a report.
+
+Usage:
+    python evals/run_eval.py                       # all 24 cases, default model
+    python evals/run_eval.py --model claude-sonnet-5-5
+    python evals/run_eval.py --cases R-1001 R-1004 # only some cases
+
+What is measured:
+- accuracy: share of cases where the agent's decision equals the label
+- precision / recall per decision type
+- "wrong approvals": agent said APPROVE but the label is REJECT/ESCALATE.
+  This is the most expensive error for a shop (money paid out wrongly).
+- policy hit rate: did the agent cite the policy section that decides the case?
+- grounding rate: did it only cite sections it actually retrieved?
+- cost, tokens, latency and number of tool calls per case
+"""
+
+import argparse
+import json
+import tempfile
+import threading
+from collections import Counter
+from concurrent.futures import ThreadPoolExecutor
+from datetime import datetime
+from pathlib import Path
+
+from refund_agent import config, db, seed
+from refund_agent.agent import RefundReviewAgent
+from refund_agent.knowledge import PolicyIndex
+
+DECISIONS = ["APPROVE", "REJECT", "ESCALATE"]
+EVAL_DIR = Path(__file__).resolve().parent
+
+
+def run(model: str, case_ids: list[str] | None, workers: int) -> dict:
+    labels = json.loads(config.LABELS_PATH.read_text(encoding="utf-8"))
+    case_ids = case_ids or list(labels)
+
+    # Evaluate on a fresh copy of the data, so decisions made in the UI do not interfere.
+    db_path = Path(tempfile.mkdtemp()) / "eval_shop.db"
+    seed.build_database(db_path)
+    index = PolicyIndex()  # shared: loading the embedding model once is enough
+    local = threading.local()
+
+    def review(case_id: str) -> dict:
+        if not hasattr(local, "agent"):
+            local.agent = RefundReviewAgent(conn=db.connect(db_path), policy_index=index, model=model)
+        result = local.agent.review(case_id)
+        predicted = result.decision.decision if result.decision else "NO_DECISION"
+        expected = labels[case_id]
+        print(f"  {case_id}: expected {expected['expected']:<8} got {predicted:<11} "
+              f"{'✓' if predicted == expected['expected'] else '✗'}", flush=True)
+        return {
+            "case_id": case_id,
+            "expected": expected["expected"],
+            "expected_policy": expected["policy"],
+            "predicted": predicted,
+            "correct": predicted == expected["expected"],
+            "cited_policies": result.decision.cited_policies if result.decision else [],
+            "policy_hit": bool(result.decision) and expected["policy"] in result.decision.cited_policies,
+            "grounded": result.citations_grounded,
+            "summary": result.decision.summary if result.decision else result.error,
+            "tool_calls": len(result.trace),
+            "input_tokens": result.input_tokens,
+            "output_tokens": result.output_tokens,
+            "cost_usd": result.cost_usd,
+            "latency_s": result.latency_s,
+        }
+
+    print(f"Evaluating {len(case_ids)} cases with {model} …")
+    with ThreadPoolExecutor(max_workers=workers) as pool:
+        rows = sorted(pool.map(review, case_ids), key=lambda r: r["case_id"])
+    return {"model": model, "timestamp": datetime.now().isoformat(timespec="seconds"),
+            "metrics": compute_metrics(rows), "cases": rows}
+
+
+def compute_metrics(rows: list[dict]) -> dict:
+    n = len(rows)
+    per_class = {}
+    for d in DECISIONS:
+        tp = sum(r["predicted"] == d and r["expected"] == d for r in rows)
+        predicted = sum(r["predicted"] == d for r in rows)
+        actual = sum(r["expected"] == d for r in rows)
+        per_class[d] = {
+            "precision": round(tp / predicted, 3) if predicted else None,
+            "recall": round(tp / actual, 3) if actual else None,
+            "support": actual,
+        }
+    confusion = Counter(f"{r['expected']}->{r['predicted']}" for r in rows)
+    return {
+        "cases": n,
+        "accuracy": round(sum(r["correct"] for r in rows) / n, 3),
+        "wrong_approvals": sum(r["predicted"] == "APPROVE" and r["expected"] != "APPROVE" for r in rows),
+        "policy_hit_rate": round(sum(r["policy_hit"] for r in rows) / n, 3),
+        "grounding_rate": round(sum(r["grounded"] for r in rows) / n, 3),
+        "per_class": per_class,
+        "confusion": dict(sorted(confusion.items())),
+        "total_cost_usd": round(sum(r["cost_usd"] for r in rows), 4),
+        "avg_cost_usd": round(sum(r["cost_usd"] for r in rows) / n, 5),
+        "avg_latency_s": round(sum(r["latency_s"] for r in rows) / n, 2),
+        "avg_tool_calls": round(sum(r["tool_calls"] for r in rows) / n, 1),
+        "avg_tokens": round(sum(r["input_tokens"] + r["output_tokens"] for r in rows) / n),
+    }
+
+
+def to_markdown(report: dict) -> str:
+    m = report["metrics"]
+    lines = [
+        f"# Evaluation report – `{report['model']}`",
+        "",
+        f"Run: {report['timestamp']} · {m['cases']} labelled cases · generated by `evals/run_eval.py`",
+        "",
+        "| Metric | Value |",
+        "|---|---|",
+        f"| Accuracy | **{m['accuracy']:.0%}** |",
+        f"| Wrong approvals (money paid out wrongly) | {m['wrong_approvals']} |",
+        f"| Decisive policy section cited | {m['policy_hit_rate']:.0%} |",
+        f"| Citations grounded in retrieved sections | {m['grounding_rate']:.0%} |",
+        f"| Avg. cost per case | ${m['avg_cost_usd']:.4f} |",
+        f"| Avg. latency per case | {m['avg_latency_s']:.1f} s |",
+        f"| Avg. tool calls per case | {m['avg_tool_calls']} |",
+        f"| Avg. tokens per case | {m['avg_tokens']:,} |",
+        f"| Total cost of this run | ${m['total_cost_usd']:.4f} |",
+        "",
+        "## Per decision type",
+        "",
+        "| Decision | Precision | Recall | Cases |",
+        "|---|---|---|---|",
+    ]
+    fmt = lambda v: "–" if v is None else f"{v:.0%}"  # noqa: E731
+    for d, c in m["per_class"].items():
+        lines.append(f"| {d} | {fmt(c['precision'])} | {fmt(c['recall'])} | {c['support']} |")
+    lines += ["", "## All cases", "", "| Case | Expected | Agent | Cited | Summary |", "|---|---|---|---|---|"]
+    for r in report["cases"]:
+        mark = "✅" if r["correct"] else "❌"
+        summary = (r["summary"] or "").replace("|", "/").replace("\n", " ")
+        lines.append(f"| {r['case_id']} | {r['expected']} ({r['expected_policy']}) | {mark} {r['predicted']} "
+                     f"| {', '.join(r['cited_policies'])} | {summary} |")
+    return "\n".join(lines) + "\n"
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser.add_argument("--model", default=config.DEFAULT_MODEL)
+    parser.add_argument("--cases", nargs="*", help="Only evaluate these case ids")
+    parser.add_argument("--workers", type=int, default=4, help="Cases reviewed in parallel")
+    args = parser.parse_args()
+
+    report = run(args.model, args.cases, args.workers)
+    results_dir = EVAL_DIR / "results"
+    results_dir.mkdir(exist_ok=True)
+    stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+    (results_dir / f"{args.model}_{stamp}.json").write_text(json.dumps(report, indent=2, ensure_ascii=False))
+    markdown = to_markdown(report)
+    if not args.cases:  # only a full run updates the committed report
+        (EVAL_DIR / f"REPORT_{args.model}.md").write_text(markdown, encoding="utf-8")
+
+    m = report["metrics"]
+    print(f"\nAccuracy {m['accuracy']:.0%} · wrong approvals {m['wrong_approvals']} · "
+          f"policy hit {m['policy_hit_rate']:.0%} · ${m['avg_cost_usd']:.4f}/case · {m['avg_latency_s']}s/case")
+
+
+if __name__ == "__main__":
+    main()
