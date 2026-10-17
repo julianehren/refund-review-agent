@@ -184,11 +184,15 @@ tests/                 # pytest suite with fake LLM client
 - [x] **v1.0** – Tool-use agent, RAG over policy, structured output, human-in-the-loop UI, evaluation, tests, CI
 - [x] **v1.1** – REST API with FastAPI, so other systems can call the agent and record human decisions
 - [x] **v1.2** – n8n workflow: agent review via the API, push notification to the reviewer on escalation
-- [ ] **v1.3** – Photo check (multimodal): the agent inspects the customer's photo – is the damage really visible?
-- [ ] **v1.4** – MCP server exposing the same tools to Claude Desktop and other MCP clients
-- [ ] **v1.5** – Docker image and hosted demo
+- [ ] **v1.3** – MCP server exposing the same tools to Claude Desktop and other MCP clients
+- [ ] **v1.4** – Docker image and hosted demo
 - [ ] Harder evaluation set: ambiguous messages, contradicting facts, prompt-injection attempts; model comparison Haiku vs. Sonnet
 - [ ] Ideas: prompt caching to cut cost, LLM-as-judge for the quality of customer replies
+
+**Possible extensions**
+
+- **Photo check (multimodal):** today `photo_attached` is only a yes/no flag that the agent trusts. With Claude's vision capability the agent could inspect the photo itself – is the damage really visible, does it match the description, is it the ordered product? – and escalate when it doesn't.
+- **Digest for routine cases:** one summary notification in n8n for all APPROVE/REJECT recommendations of a run, in addition to the instant escalation alerts.
 
 ## How I built this
 
