@@ -38,14 +38,14 @@ flowchart LR
     A -- search_policies --> V[(Chroma<br/>vector DB)]
     P[store_policy.md] -. embedded with<br/>bge-small .-> V
     A -- submit_decision --> D[Structured decision<br/>Pydantic-validated]
-    D --> H[👤 Human review<br/>Streamlit]
+    D --> H[👤 Human review<br/>Streamlit UI or REST API]
     H --> L[(Audit log)]
     D --> E[📊 Evaluation<br/>24 labelled cases]
+    API[REST API<br/>FastAPI] --> A
+    S[Shop system / helpdesk] --> API
 
-    A -. planned .-> API[FastAPI]
+    N8N[n8n workflow] -. planned .-> API
     A -. planned .-> MCP[MCP server]
-    API -. planned .-> N8N[n8n workflow]
-    style API stroke-dasharray: 5 5
     style MCP stroke-dasharray: 5 5
     style N8N stroke-dasharray: 5 5
 ```
@@ -55,7 +55,8 @@ flowchart LR
 3. **Structured output.** The final answer is a `submit_decision` tool call validated by Pydantic (decision, confidence, key facts, cited sections, draft customer reply). Invalid output is sent back to the model to correct itself.
 4. **Grounding check.** The agent may only cite policy sections it actually retrieved – otherwise the UI shows a warning and the evaluation counts it.
 5. **Human-in-the-loop.** The Streamlit UI shows recommendation, facts, cited rules, cost and the full tool trace. The reviewer accepts or overrides (overrides require a note); everything lands in an audit table.
-6. **Evaluation.** 24 synthetic cases, one per rule incl. edge cases (day 14 vs. day 15), with labels stored *outside* the database so the agent cannot see them.
+6. **REST API.** A FastAPI service offers the same workflow to other systems: list requests, let the agent review one, record the human decision, read the audit log.
+7. **Evaluation.** 24 synthetic cases, one per rule incl. edge cases (day 14 vs. day 15), with labels stored *outside* the database so the agent cannot see them.
 
 ## What it shows
 
@@ -64,7 +65,8 @@ flowchart LR
 | Agentic workflow / tool use / function calling | [`agent.py`](src/refund_agent/agent.py), [`tools.py`](src/refund_agent/tools.py) |
 | RAG: embeddings, vector database, semantic search | [`knowledge.py`](src/refund_agent/knowledge.py) |
 | Structured outputs & self-correction | [`models.py`](src/refund_agent/models.py), `submit_decision` in `agent.py` |
-| Human-in-the-loop, four-eyes principle, audit log | [`app/streamlit_app.py`](app/streamlit_app.py) |
+| Human-in-the-loop, four-eyes principle, audit log | [`app/streamlit_app.py`](app/streamlit_app.py), [`decisions.py`](src/refund_agent/decisions.py) |
+| REST API / backend integration | [`api.py`](src/refund_agent/api.py) (FastAPI) |
 | LLM evaluation, KPIs, cost & latency tracking | [`evals/run_eval.py`](evals/run_eval.py) |
 | SQL data modelling with constraints | [`schema.sql`](src/refund_agent/schema.sql) |
 | Testing (no API key needed) & CI/CD | [`tests/`](tests), [GitHub Actions](.github/workflows/ci.yml) |
@@ -91,6 +93,7 @@ Then:
 
 ```bash
 streamlit run app/streamlit_app.py           # review UI in the browser
+uvicorn refund_agent.api:app --reload        # REST API, docs at http://localhost:8000/docs
 python -m refund_agent.agent R-1003 R-1014   # run the agent in the terminal
 python evals/run_eval.py                     # evaluate on all 24 labelled cases
 pytest                                       # run the tests
@@ -99,12 +102,39 @@ python scripts/try_rag.py "parcel never arrived"   # try the policy search
 
 The first start downloads the embedding model (~130 MB) once.
 
+## REST API
+
+Start the server with `uvicorn refund_agent.api:app --reload` and open **http://localhost:8000/docs** – FastAPI generates an interactive page where every endpoint can be tried out in the browser.
+
+| Endpoint | Purpose |
+|---|---|
+| `GET /requests?status=open` | List refund requests |
+| `GET /requests/{id}` | Details of one request |
+| `POST /reviews` | Let the agent review a request → decision, cited policies, full tool trace, tokens, cost, latency |
+| `POST /requests/{id}/decision` | Human records the final decision (overriding the agent requires a `reviewer_note`) |
+| `GET /decisions` | Audit log: agent recommendation vs. human decision |
+
+```bash
+curl -X POST localhost:8000/reviews -H "Content-Type: application/json" -d '{"request_id": "R-1022"}'
+# -> {"decision": {"decision": "REJECT", "cited_policies": ["§4"], "summary": "The skillet's rust is caused by
+#     dishwasher use, which the care instructions explicitly forbid ..."}, "trace": [...], "cost_usd": 0.0027, ...}
+
+curl -X POST localhost:8000/requests/R-1022/decision -H "Content-Type: application/json" \
+     -d '{"decision": "ESCALATE", "reviewer_note": "Long-time customer, check goodwill"}'
+```
+
+On Windows PowerShell use `curl.exe` instead of `curl`, or `Invoke-RestMethod`.
+
+The API adds no business logic of its own – it calls the same tools, agent and decision rules as the UI.
+
 ## Project structure
 
 ```
 src/refund_agent/
 ├── agent.py        # the agentic loop: Claude ↔ tools until submit_decision
-├── tools.py        # database tools (pure Python, reusable by API/MCP later)
+├── api.py          # REST API (FastAPI) for other systems
+├── decisions.py    # human-in-the-loop rules, shared by UI and API
+├── tools.py        # database tools (pure Python, reused by agent, API and later MCP)
 ├── knowledge.py    # RAG: policy chunking, embeddings, Chroma search
 ├── models.py       # Pydantic models for decision, trace and result
 ├── seed.py         # synthetic shop data + 24 labelled cases
@@ -119,7 +149,7 @@ tests/                 # pytest suite with fake LLM client
 ## Design decisions
 
 - **Dates are computed in code, not by the LLM.** Tools return ready-made numbers such as `days_from_delivery_to_request`. LLMs are unreliable at counting days; Python is not.
-- **Tools don't know about the LLM.** `tools.py` contains plain functions plus JSON schemas. The same functions can be exposed via a REST API or an MCP server without changes (see roadmap).
+- **Tools don't know about the LLM.** `tools.py` contains plain functions plus JSON schemas. That is why the REST API could be added without touching the agent, and why an MCP server can reuse the same functions.
 - **Hand-written loop instead of LangChain.** For a single agent with five tools a framework adds more abstraction than value; writing the loop makes tool dispatch, error handling and token accounting explicit.
 - **"When in doubt, escalate".** The policy and prompt make ESCALATE the safe default. The evaluation tracks *wrong approvals* separately, because paying out money wrongly is the costliest error.
 - **Local embeddings.** No second API key, no data leaves the machine for retrieval, and the index rebuilds automatically when the policy file changes.
@@ -129,10 +159,11 @@ tests/                 # pytest suite with fake LLM client
 ## Roadmap
 
 - [x] **v1.0** – Tool-use agent, RAG over policy, structured output, human-in-the-loop UI, evaluation, tests, CI
-- [ ] **v1.1** – REST API with FastAPI (`POST /reviews`), so other systems can call the agent
-- [ ] **v1.2** – MCP server exposing the same tools to Claude Desktop and other MCP clients
-- [ ] **v1.3** – n8n workflow: new request → agent review → notification to the reviewer
-- [ ] **v1.4** – Docker image and hosted demo
+- [x] **v1.1** – REST API with FastAPI, so other systems can call the agent and record human decisions
+- [ ] **v1.2** – n8n workflow: incoming e-mail → agent review via the API → notification to the reviewer
+- [ ] **v1.3** – Photo check (multimodal): the agent inspects the customer's photo – is the damage really visible?
+- [ ] **v1.4** – MCP server exposing the same tools to Claude Desktop and other MCP clients
+- [ ] **v1.5** – Docker image and hosted demo
 - [ ] Harder evaluation set: ambiguous messages, contradicting facts, prompt-injection attempts; model comparison Haiku vs. Sonnet
 - [ ] Ideas: prompt caching to cut cost, LLM-as-judge for the quality of customer replies
 

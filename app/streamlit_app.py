@@ -15,12 +15,12 @@ import streamlit as st
 
 from refund_agent import config, db
 from refund_agent.agent import RefundReviewAgent
+from refund_agent.decisions import DecisionError, record_decision
 from refund_agent.knowledge import load_policy_sections
 
 st.set_page_config(page_title="Refund Review Agent", page_icon="🧾", layout="wide")
 
 DECISION_STYLE = {"APPROVE": ("✅", "green"), "REJECT": ("⛔", "red"), "ESCALATE": ("⚠️", "orange")}
-STATUS_FOR_DECISION = {"APPROVE": "refunded", "REJECT": "rejected", "ESCALATE": "escalated"}
 REASON_LABELS = {
     "changed_mind": "Changed mind", "damaged_in_transit": "Damaged in transit", "defective": "Defective",
     "not_received": "Not received", "wrong_item": "Wrong item",
@@ -170,16 +170,11 @@ if human != decision.decision:
     st.warning(f"You are overriding the agent ({decision.decision} → {human}).")
 
 if st.button("Submit decision", type="primary"):
-    if human != decision.decision and not note.strip():
-        st.error("Please add a short note explaining why you override the agent.")
+    try:
+        record_decision(conn, request_id, decision.decision, human, note, result.model, result.cost_usd)
+    except DecisionError as exc:
+        st.error(str(exc))
     else:
-        conn.execute(
-            "INSERT INTO review_decisions (request_id, agent_decision, human_decision, reviewer_note, model, cost_usd) "
-            "VALUES (?, ?, ?, ?, ?, ?)",
-            (request_id, decision.decision, human, note.strip() or None, result.model, result.cost_usd),
-        )
-        conn.execute("UPDATE refund_requests SET status = ? WHERE id = ?", (STATUS_FOR_DECISION[human], request_id))
-        conn.commit()
         st.session_state.flash = f"Saved: {request_id} → {human}. The reply was sent to the customer (simulated)."
         st.rerun()
 
