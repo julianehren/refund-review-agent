@@ -44,8 +44,8 @@ def get_agent(model: str) -> RefundReviewAgent:
 
 
 @st.cache_data
-def get_policy_texts() -> dict[str, str]:
-    return {s["section"]: s["text"] for s in load_policy_sections()}
+def get_policy_sections() -> dict[str, dict]:
+    return {s["section"]: s for s in load_policy_sections()}
 
 
 conn = get_connection()
@@ -67,12 +67,13 @@ with st.sidebar:
 
     def label(row) -> str:
         done = "" if row["status"] == "open" else f" · {row['status']}"
-        agent_mark = " 🤖" if row["id"] in st.session_state.results else ""
-        return f"{row['id']} · {REASON_LABELS[row['reason']]} · {row['amount_requested']:.2f} €{done}{agent_mark}"
+        # Note: the label must not change while a request is selected – Streamlit would treat
+        # the radio as a new widget and jump back to the first entry.
+        return f"{row['id']} · {REASON_LABELS[row['reason']]} · {row['amount_requested']:.2f} €{done}"
 
     rows = {row["id"]: row for row in queue}
     request_id = st.radio("Open requests", list(rows), format_func=lambda rid: label(rows[rid]),
-                          label_visibility="collapsed")
+                          label_visibility="collapsed", key="selected_request")
 
     st.divider()
     model = st.selectbox("Model", list(config.MODEL_PRICES_USD), index=0,
@@ -132,10 +133,11 @@ with left:
     for fact in decision.key_facts:
         st.markdown(f"- {fact}")
     st.markdown("**Cited policy sections**")
-    policies = get_policy_texts()
+    policies = get_policy_sections()
     for section in decision.cited_policies:
-        with st.expander(section):
-            st.markdown(policies.get(section, "_Section not found in policy._"))
+        policy = policies.get(section)
+        with st.expander(f"{section} {policy['title']}" if policy else f"{section} (unknown section)"):
+            st.markdown(policy["text"] if policy else "_Section not found in policy._")
     if not result.citations_grounded:
         st.warning("The agent cited a section it did not retrieve via search – check the reasoning carefully.")
 

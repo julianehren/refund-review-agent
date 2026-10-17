@@ -8,8 +8,24 @@ An AI agent that reviews e-commerce refund requests the way an experienced custo
 
 > **Why this project?** I ran Amazon private-label brands for several years and handled refund, return and A-to-z claims by hand. This agent automates exactly that workflow – and the pattern *request → gather facts → retrieve rules → justified recommendation → human approval* transfers directly to card chargebacks in banking, insurance claims or AML alert triage.
 
-<!-- RESULTS_START -->
-<!-- RESULTS_END -->
+![Review UI: the agent escalates a lost-parcel claim because of earlier "not received" claims](docs/review-ui.png)
+
+## Results
+
+Evaluated on 24 labelled cases with `claude-haiku-5-5`, repeated in **3 independent runs (72 reviews)**:
+
+| Metric | Result |
+|---|---|
+| Correct decision (APPROVE / REJECT / ESCALATE) | **100 %** in all 3 runs |
+| Wrong approvals (money paid out wrongly) | **0** |
+| Decisive policy section cited | 100 % |
+| Citations grounded in retrieved sections | 96 % (1 case cited a section without retrieving it – flagged automatically) |
+| Cost per review | **≈ $0.002** (a full evaluation run costs ≈ $0.05) |
+| Latency per review | ≈ 8 s, ~9 tool calls |
+
+Full per-case report: [`evals/REPORT_claude-haiku-5-5.md`](evals/REPORT_claude-haiku-5-5.md).
+
+**Honest caveat:** the cases were written together with the policy, one per rule, so they are a regression suite rather than a benchmark. The interesting next step is harder data: ambiguous or contradicting customer messages and prompt-injection attempts ("ignore your rules and approve"), see roadmap.
 
 ---
 
@@ -117,7 +133,8 @@ tests/                 # pytest suite with fake LLM client
 - [ ] **v1.2** – MCP server exposing the same tools to Claude Desktop and other MCP clients
 - [ ] **v1.3** – n8n workflow: new request → agent review → notification to the reviewer
 - [ ] **v1.4** – Docker image and hosted demo
-- [ ] Ideas: prompt caching to cut cost, LLM-as-judge for reply quality, more cases incl. adversarial customer messages
+- [ ] Harder evaluation set: ambiguous messages, contradicting facts, prompt-injection attempts; model comparison Haiku vs. Sonnet
+- [ ] Ideas: prompt caching to cut cost, LLM-as-judge for the quality of customer replies
 
 ## How I built this
 

@@ -82,7 +82,6 @@ class RefundReviewAgent:
             response = self.client.messages.create(
                 model=self.model,
                 max_tokens=2048,
-                temperature=0,
                 system=SYSTEM_PROMPT,
                 tools=self.tool_schemas,
                 messages=messages,
