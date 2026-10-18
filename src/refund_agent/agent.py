@@ -20,6 +20,7 @@ import anthropic
 from pydantic import ValidationError
 
 from refund_agent import config, db
+from refund_agent.guardrails import apply_guardrails
 from refund_agent.knowledge import SEARCH_POLICIES_SCHEMA, PolicyIndex
 from refund_agent.models import AgentResult, RefundDecision, ToolCall
 from refund_agent.tools import DATABASE_TOOL_SCHEMAS, DATABASE_TOOLS, ToolError
@@ -131,13 +132,22 @@ class RefundReviewAgent:
         else:
             error = f"Agent did not finish within {config.MAX_AGENT_STEPS} steps."
 
+        # Grounding check: did the agent only cite sections it actually retrieved?
+        grounded = bool(decision) and set(decision.cited_policies) <= set(retrieved)
+        guardrail = None
+        if decision is not None:
+            row = self.conn.execute("SELECT amount_requested FROM refund_requests WHERE id = ?",
+                                    (request_id,)).fetchone()
+            if row is not None:
+                decision, guardrail = apply_guardrails(decision, row["amount_requested"])
+
         return AgentResult(
             request_id=request_id,
             decision=decision,
             trace=trace,
             retrieved_policies=retrieved,
-            # Grounding check: did the agent only cite sections it actually retrieved?
-            citations_grounded=bool(decision) and set(decision.cited_policies) <= set(retrieved),
+            citations_grounded=grounded,
+            guardrail=guardrail,
             model=self.model,
             input_tokens=input_tokens,
             output_tokens=output_tokens,
@@ -164,6 +174,8 @@ def _print_result(result: AgentResult) -> None:
         print(f"\nDecision: {d.decision} (confidence: {d.confidence}) – cites {', '.join(d.cited_policies)}")
         print(f"Summary:  {d.summary}")
         print(f"Reply:    {d.customer_reply}")
+        if result.guardrail:
+            print(f"!!        {result.guardrail}")
     else:
         print(f"\nNo decision: {result.error}")
     print(f"\n{result.llm_calls} LLM calls · {result.input_tokens + result.output_tokens} tokens · "

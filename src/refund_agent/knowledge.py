@@ -12,7 +12,6 @@ The agent then cites the returned section ids in its decision.
 """
 
 import hashlib
-import re
 import threading
 from pathlib import Path
 
@@ -20,20 +19,7 @@ import chromadb
 from chromadb import Documents, EmbeddingFunction, Embeddings
 
 from refund_agent import config
-
-
-def load_policy_sections(path: Path = config.POLICY_PATH) -> list[dict]:
-    """Split the policy markdown into sections like {"section": "§5", "title": ..., "text": ...}."""
-    markdown = path.read_text(encoding="utf-8")
-    sections = []
-    for block in re.split(r"^## ", markdown, flags=re.MULTILINE)[1:]:
-        heading, _, body = block.partition("\n")
-        match = re.match(r"(§\d+)\s+(.*)", heading.strip())
-        if not match:
-            continue
-        section_id, title = match.groups()
-        sections.append({"section": section_id, "title": title, "text": f"{heading.strip()}\n{body.strip()}"})
-    return sections
+from refund_agent.policy import load_policy_sections
 
 
 class FastEmbedFunction(EmbeddingFunction):

@@ -5,18 +5,28 @@ Start with:  streamlit run app/streamlit_app.py
 The agent only RECOMMENDS. A human reviewer sees the recommendation, the
 facts and the cited policy sections, and then accepts or overrides it.
 Every final decision is written to the review_decisions audit table.
+
+Without an ANTHROPIC_API_KEY (e.g. the hosted online demo) the app runs in demo
+mode and replays recorded real agent runs instead of calling Claude.
 """
 
 import json
-import os
+import sys
+from pathlib import Path
 
 import pandas as pd
 import streamlit as st
 
-from refund_agent import config, db
-from refund_agent.agent import RefundReviewAgent
-from refund_agent.decisions import DecisionError, record_decision
-from refund_agent.knowledge import load_policy_sections
+# Make the package importable when the project is not pip-installed (Streamlit Community Cloud)
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
+
+from refund_agent import config, db  # noqa: E402
+from refund_agent.decisions import DecisionError, record_decision, reset_decisions  # noqa: E402
+from refund_agent.demo import get_demo_result, is_demo_mode  # noqa: E402
+from refund_agent.policy import load_policy_sections  # noqa: E402
+
+REPO_URL = "https://github.com/julianehren/refund-review-agent"
+DEMO = is_demo_mode()
 
 st.set_page_config(page_title="Refund Review Agent", page_icon="🧾", layout="wide")
 
@@ -39,7 +49,9 @@ def get_connection():
 
 
 @st.cache_resource(show_spinner="Loading knowledge base (first start downloads the embedding model) …")
-def get_agent(model: str) -> RefundReviewAgent:
+def get_agent(model: str):
+    from refund_agent.agent import RefundReviewAgent  # imported lazily: the demo does not need Chroma
+
     return RefundReviewAgent(conn=get_connection(), model=model)
 
 
@@ -76,9 +88,19 @@ with st.sidebar:
                           label_visibility="collapsed", key="selected_request")
 
     st.divider()
-    model = st.selectbox("Model", list(config.MODEL_PRICES_USD), index=0,
-                         help="Haiku is the cheapest; Sonnet and Opus are stronger but cost more.")
+    if DEMO:
+        model = config.DEFAULT_MODEL
+        st.caption(f"**Demo mode** · recorded runs of `{model}`")
+        if st.button("🔄 Reset demo data", help="Reopen all requests and clear the audit log"):
+            reset_decisions(conn)
+            st.session_state.results = {}
+            st.session_state.flash = "Demo data reset – all requests are open again."
+            st.rerun()
+    else:
+        model = st.selectbox("Model", list(config.MODEL_PRICES_USD), index=0,
+                             help="Haiku is the cheapest; Sonnet and Opus are stronger but cost more.")
     st.caption(f"Simulation date: {config.AS_OF_DATE.isoformat()}")
+    st.caption(f"[Source code on GitHub]({REPO_URL})")
 
 # --- main area: request details ------------------------------------------------
 request = conn.execute(
@@ -87,6 +109,16 @@ request = conn.execute(
     "JOIN shipments s ON s.order_id = r.order_id WHERE r.id = ?",
     (request_id,),
 ).fetchone()
+
+if DEMO:
+    st.info(
+        "**Online demo** – an AI agent reviews refund requests, a human makes the final call. "
+        "Pick a request, click **Run agent** and accept or override the recommendation. "
+        "To keep the demo free, the agent's answers are **replays of real recorded runs** "
+        "(Claude Haiku, tool use + RAG) – no live AI calls. Decisions go into a shared demo database. "
+        f"[How it works → GitHub]({REPO_URL})",
+        icon="👋",
+    )
 
 if "flash" in st.session_state:
     st.success(st.session_state.pop("flash"))
@@ -104,11 +136,15 @@ st.caption(f"Order {request['order_id']} · shipment status: {request['shipment_
 
 # --- run the agent ---------------------------------------------------------------
 if st.button("🤖 Run agent", type="primary", disabled=request["status"] != "open"):
-    if not os.getenv("ANTHROPIC_API_KEY"):
-        st.error("No ANTHROPIC_API_KEY found. Copy .env.example to .env and add your key.")
-        st.stop()
-    with st.spinner("The agent is gathering facts and searching the policy …"):
-        st.session_state.results[request_id] = get_agent(model).review(request_id)
+    if DEMO:
+        recorded = get_demo_result(request_id)
+        if recorded is None:
+            st.warning("No recorded run for this request in the demo.")
+            st.stop()
+        st.session_state.results[request_id] = recorded
+    else:
+        with st.spinner("The agent is gathering facts and searching the policy …"):
+            st.session_state.results[request_id] = get_agent(model).review(request_id)
 
 result = st.session_state.results.get(request_id)
 if result is None:
@@ -126,6 +162,8 @@ st.divider()
 st.subheader("Agent recommendation")
 st.markdown(f"## :{color}[{icon} {decision.decision}]  \n*confidence: {decision.confidence}*")
 st.write(decision.summary)
+if result.guardrail:
+    st.warning(f"🛡️ {result.guardrail}")
 
 left, right = st.columns([3, 2])
 with left:
@@ -147,7 +185,8 @@ with right:
     m2.metric("Latency", f"{result.latency_s:.1f} s")
     m1.metric("Tokens", f"{result.input_tokens + result.output_tokens:,}")
     m2.metric("Tool calls", len(result.trace))
-    st.caption(f"Model: {result.model} · LLM calls: {result.llm_calls}")
+    st.caption(f"Model: {result.model} · LLM calls: {result.llm_calls}"
+               + (" · recorded run (replay)" if DEMO else ""))
 
 with st.expander("🔍 Agent trace – every tool call with input and output"):
     for n, step in enumerate(result.trace, start=1):

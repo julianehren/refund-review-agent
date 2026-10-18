@@ -40,3 +40,15 @@ def record_decision(conn: sqlite3.Connection, request_id: str, agent_decision: s
     conn.execute("UPDATE refund_requests SET status = ? WHERE id = ?", (STATUS_FOR_DECISION[human_decision], request_id))
     conn.commit()
     return dict(conn.execute("SELECT * FROM review_decisions WHERE id = ?", (cursor.lastrowid,)).fetchone())
+
+
+def reset_decisions(conn: sqlite3.Connection) -> int:
+    """Undo all human decisions: reopen the requests and clear the audit log (used by the online demo).
+
+    Returns the number of reopened requests. Historic requests (not decided via the review) stay untouched.
+    """
+    cursor = conn.execute(
+        "UPDATE refund_requests SET status = 'open' WHERE id IN (SELECT request_id FROM review_decisions)")
+    conn.execute("DELETE FROM review_decisions")
+    conn.commit()
+    return cursor.rowcount

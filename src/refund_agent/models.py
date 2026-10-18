@@ -64,3 +64,4 @@ class AgentResult(BaseModel):
     latency_s: float
     llm_calls: int
     error: str | None = None
+    guardrail: str | None = None  # set when a hard rule in code corrected the agent's decision

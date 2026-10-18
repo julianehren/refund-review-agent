@@ -59,6 +59,7 @@ def run(model: str, case_ids: list[str] | None, workers: int) -> dict:
             "cited_policies": result.decision.cited_policies if result.decision else [],
             "policy_hit": bool(result.decision) and expected["policy"] in result.decision.cited_policies,
             "grounded": result.citations_grounded,
+            "guardrail": result.guardrail is not None,
             "summary": result.decision.summary if result.decision else result.error,
             "tool_calls": len(result.trace),
             "input_tokens": result.input_tokens,
@@ -93,6 +94,7 @@ def compute_metrics(rows: list[dict]) -> dict:
         "wrong_approvals": sum(r["predicted"] == "APPROVE" and r["expected"] != "APPROVE" for r in rows),
         "policy_hit_rate": round(sum(r["policy_hit"] for r in rows) / n, 3),
         "grounding_rate": round(sum(r["grounded"] for r in rows) / n, 3),
+        "guardrail_interventions": sum(r.get("guardrail", False) for r in rows),
         "per_class": per_class,
         "confusion": dict(sorted(confusion.items())),
         "total_cost_usd": round(sum(r["cost_usd"] for r in rows), 4),
@@ -116,6 +118,7 @@ def to_markdown(report: dict) -> str:
         f"| Wrong approvals (money paid out wrongly) | {m['wrong_approvals']} |",
         f"| Decisive policy section cited | {m['policy_hit_rate']:.0%} |",
         f"| Citations grounded in retrieved sections | {m['grounding_rate']:.0%} |",
+        f"| Decisions corrected by a code guardrail | {m['guardrail_interventions']} |",
         f"| Avg. cost per case | ${m['avg_cost_usd']:.4f} |",
         f"| Avg. latency per case | {m['avg_latency_s']:.1f} s |",
         f"| Avg. tool calls per case | {m['avg_tool_calls']} |",
@@ -132,7 +135,7 @@ def to_markdown(report: dict) -> str:
         lines.append(f"| {d} | {fmt(c['precision'])} | {fmt(c['recall'])} | {c['support']} |")
     lines += ["", "## All cases", "", "| Case | Expected | Agent | Cited | Summary |", "|---|---|---|---|---|"]
     for r in report["cases"]:
-        mark = "✅" if r["correct"] else "❌"
+        mark = ("✅" if r["correct"] else "❌") + (" 🛡️" if r.get("guardrail") else "")
         summary = (r["summary"] or "").replace("|", "/").replace("\n", " ")
         lines.append(f"| {r['case_id']} | {r['expected']} ({r['expected_policy']}) | {mark} {r['predicted']} "
                      f"| {', '.join(r['cited_policies'])} | {summary} |")
