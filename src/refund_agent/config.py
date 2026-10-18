@@ -10,10 +10,12 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 
-load_dotenv()  # reads ANTHROPIC_API_KEY (and optional CLAUDE_MODEL) from .env
-
 # --- Paths -----------------------------------------------------------------
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
+
+# Reads ANTHROPIC_API_KEY (and optional CLAUDE_MODEL) from the project's .env – with a fixed path,
+# so it also works when another program (e.g. Claude Desktop) starts us from a different folder.
+load_dotenv(PROJECT_ROOT / ".env")
 DATA_DIR = PROJECT_ROOT / "data"
 DB_PATH = Path(os.getenv("REFUND_DB_PATH", DATA_DIR / "shop.db"))
 POLICY_PATH = DATA_DIR / "store_policy.md"

@@ -13,6 +13,7 @@ The agent then cites the returned section ids in its decision.
 
 import hashlib
 import re
+import threading
 from pathlib import Path
 
 import chromadb
@@ -105,6 +106,24 @@ class PolicyIndex:
             }
             for doc, meta, distance in zip(result["documents"][0], result["metadatas"][0], result["distances"][0])
         ]
+
+
+_shared_index: PolicyIndex | None = None
+_shared_index_lock = threading.Lock()
+
+
+def get_shared_policy_index() -> PolicyIndex:
+    """One PolicyIndex per process, created on first use.
+
+    The lock matters: the REST API and the MCP server can receive several
+    requests at the same time. Without it, parallel first requests would each
+    open the Chroma database at once, which fails (see release v1.1.1).
+    """
+    global _shared_index
+    with _shared_index_lock:
+        if _shared_index is None:
+            _shared_index = PolicyIndex()
+        return _shared_index
 
 
 SEARCH_POLICIES_SCHEMA = {
