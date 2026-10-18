@@ -46,8 +46,9 @@ flowchart LR
 
     N8N[n8n workflow] --> API
     N8N -- only on ESCALATE --> NT[🔔 Push notification<br/>ntfy]
-    A -. planned .-> MCP[MCP server]
-    style MCP stroke-dasharray: 5 5
+    CD[Claude Desktop<br/>or any MCP client] --> MCP[MCP server]
+    MCP -- same tools --> DB
+    MCP -- search_policies --> V
 ```
 
 1. **Tool use (agentic loop).** Claude receives the request id and decides on its own which tools to call and in which order. The loop is written by hand on the Anthropic Messages API (no framework), so every step is transparent.
@@ -57,7 +58,8 @@ flowchart LR
 5. **Human-in-the-loop.** The Streamlit UI shows recommendation, facts, cited rules, cost and the full tool trace. The reviewer accepts or overrides (overrides require a note); everything lands in an audit table.
 6. **REST API.** A FastAPI service offers the same workflow to other systems: list requests, let the agent review one, record the human decision, read the audit log.
 7. **Workflow automation (n8n).** A low-code workflow pulls open requests, has the agent review them via the API and notifies a human only when the agent escalates.
-8. **Evaluation.** 24 synthetic cases, one per rule incl. edge cases (day 14 vs. day 15), with labels stored *outside* the database so the agent cannot see them.
+8. **MCP server.** The same tools are exposed via the Model Context Protocol, so AI assistants like Claude Desktop can look up requests, search the policy, run the review agent and record decisions from a chat.
+9. **Evaluation.** 24 synthetic cases, one per rule incl. edge cases (day 14 vs. day 15), with labels stored *outside* the database so the agent cannot see them.
 
 ## What it shows
 
@@ -69,6 +71,7 @@ flowchart LR
 | Human-in-the-loop, four-eyes principle, audit log | [`app/streamlit_app.py`](app/streamlit_app.py), [`decisions.py`](src/refund_agent/decisions.py) |
 | REST API / backend integration | [`api.py`](src/refund_agent/api.py) (FastAPI) |
 | Workflow automation / low-code | [n8n workflow](integrations/n8n/refund-review-escalation-alerts.json) |
+| MCP (Model Context Protocol) server | [`mcp_server.py`](src/refund_agent/mcp_server.py) |
 | LLM evaluation, KPIs, cost & latency tracking | [`evals/run_eval.py`](evals/run_eval.py) |
 | SQL data modelling with constraints | [`schema.sql`](src/refund_agent/schema.sql) |
 | Testing (no API key needed) & CI/CD | [`tests/`](tests), [GitHub Actions](.github/workflows/ci.yml) |
@@ -144,12 +147,42 @@ Routine cases (APPROVE/REJECT) are not pushed: they wait in the review queue, so
 
 **Run it:** start the API (`uvicorn refund_agent.api:app`), start n8n (`npx n8n`), import the JSON file (*Workflows → Import from file*), replace `YOUR-NTFY-TOPIC` in the last node and click *Execute workflow*. The limit node keeps test runs small and cheap – remove it to review all open requests. Use `127.0.0.1` rather than `localhost` in n8n (Node.js may resolve `localhost` to IPv6, while uvicorn listens on IPv4).
 
+## MCP server (Claude Desktop)
+
+[`mcp_server.py`](src/refund_agent/mcp_server.py) exposes the shop to any MCP client. In Claude Desktop you can then simply ask:
+
+> *"Which refund requests are open?"* · *"Look at R-1015 – why would it be escalated?"* · *"Get a second opinion from the review agent and, after I confirm, record ESCALATE."*
+
+| Tool | Type | Purpose |
+|---|---|---|
+| `list_open_requests` | read-only | Requests waiting for a decision |
+| `get_refund_request`, `get_order`, `get_shipment`, `get_customer_history` | read-only | The same database tools the agent uses |
+| `search_policies` | read-only | RAG search in the refund policy |
+| `run_agent_review` | read-only, calls Claude API | Second opinion from the review agent (costs a fraction of a cent) |
+| `record_human_decision` | **writes** | Records the final human decision – marked as destructive, so the client asks for confirmation |
+
+**Setup in Claude Desktop:** *Settings → Developer → Edit Config* and add (adjust the path to your clone):
+
+```json
+{
+  "mcpServers": {
+    "refund-review-agent": {
+      "command": "C:\\path\\to\\refund-review-agent\\.venv\\Scripts\\python.exe",
+      "args": ["-m", "refund_agent.mcp_server"]
+    }
+  }
+}
+```
+
+On macOS/Linux use `.venv/bin/python`. Restart Claude Desktop completely; the tools appear under *Connectors*. The server reads the API key from the project's `.env`.
+
 ## Project structure
 
 ```
 src/refund_agent/
 ├── agent.py        # the agentic loop: Claude ↔ tools until submit_decision
 ├── api.py          # REST API (FastAPI) for other systems
+├── mcp_server.py   # MCP server for Claude Desktop & other MCP clients
 ├── decisions.py    # human-in-the-loop rules, shared by UI and API
 ├── tools.py        # database tools (pure Python, reused by agent, API and later MCP)
 ├── knowledge.py    # RAG: policy chunking, embeddings, Chroma search
@@ -167,7 +200,7 @@ tests/                 # pytest suite with fake LLM client
 ## Design decisions
 
 - **Dates are computed in code, not by the LLM.** Tools return ready-made numbers such as `days_from_delivery_to_request`. LLMs are unreliable at counting days; Python is not.
-- **Tools don't know about the LLM.** `tools.py` contains plain functions plus JSON schemas. That is why the REST API could be added without touching the agent, and why an MCP server can reuse the same functions.
+- **Tools don't know about the LLM.** `tools.py` contains plain functions plus JSON schemas. That is why the REST API and the MCP server could be added without touching the agent – all three use the same functions.
 - **Hand-written loop instead of LangChain.** For a single agent with five tools a framework adds more abstraction than value; writing the loop makes tool dispatch, error handling and token accounting explicit.
 - **"When in doubt, escalate".** The policy and prompt make ESCALATE the safe default. The evaluation tracks *wrong approvals* separately, because paying out money wrongly is the costliest error.
 - **Local embeddings.** No second API key, no data leaves the machine for retrieval, and the index rebuilds automatically when the policy file changes.
@@ -184,7 +217,7 @@ tests/                 # pytest suite with fake LLM client
 - [x] **v1.0** – Tool-use agent, RAG over policy, structured output, human-in-the-loop UI, evaluation, tests, CI
 - [x] **v1.1** – REST API with FastAPI, so other systems can call the agent and record human decisions
 - [x] **v1.2** – n8n workflow: agent review via the API, push notification to the reviewer on escalation
-- [ ] **v1.3** – MCP server exposing the same tools to Claude Desktop and other MCP clients
+- [x] **v1.3** – MCP server exposing the same tools to Claude Desktop and other MCP clients
 - [ ] **v1.4** – Docker image and hosted demo
 - [ ] Harder evaluation set: ambiguous messages, contradicting facts, prompt-injection attempts; model comparison Haiku vs. Sonnet
 - [ ] Ideas: prompt caching to cut cost, LLM-as-judge for the quality of customer replies

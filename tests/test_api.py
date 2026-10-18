@@ -102,8 +102,10 @@ def test_policy_index_is_created_only_once_under_parallel_requests(monkeypatch):
             time.sleep(0.05)  # simulate slow model loading, so threads overlap
             created.append(threading.get_ident())
 
-    monkeypatch.setattr(api, "PolicyIndex", SlowIndex)
-    monkeypatch.setattr(api, "_policy_index", None)
+    from refund_agent import knowledge
+
+    monkeypatch.setattr(knowledge, "PolicyIndex", SlowIndex)
+    monkeypatch.setattr(knowledge, "_shared_index", None)
     with ThreadPoolExecutor(6) as pool:
         indexes = list(pool.map(lambda _: api.get_policy_index(), range(6)))
     assert len(created) == 1

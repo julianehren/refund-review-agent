@@ -19,7 +19,6 @@ without any knowledge of Streamlit or Claude.
 
 import os
 import sqlite3
-import threading
 from collections.abc import Iterator
 from functools import lru_cache
 from typing import Annotated, Literal
@@ -31,7 +30,7 @@ from pydantic import BaseModel, Field
 from refund_agent import __version__, config, db, tools
 from refund_agent.agent import RefundReviewAgent
 from refund_agent.decisions import DecisionError, record_decision
-from refund_agent.knowledge import PolicyIndex
+from refund_agent.knowledge import PolicyIndex, get_shared_policy_index
 from refund_agent.models import AgentResult, DecisionType
 
 app = FastAPI(
@@ -59,22 +58,9 @@ def get_db() -> Iterator[sqlite3.Connection]:
         conn.close()
 
 
-_policy_index: PolicyIndex | None = None
-_policy_index_lock = threading.Lock()
-
-
 def get_policy_index() -> PolicyIndex:
-    """Loaded once: the embedding model is too slow to load for every request.
-
-    The lock matters: n8n sends several requests at the same time. Without it,
-    each parallel first request would try to open the Chroma database at once,
-    which fails ("Could not connect to tenant default_tenant").
-    """
-    global _policy_index
-    with _policy_index_lock:
-        if _policy_index is None:
-            _policy_index = PolicyIndex()
-        return _policy_index
+    """Loaded once per process (thread-safe), shared with the MCP server code."""
+    return get_shared_policy_index()
 
 
 @lru_cache
