@@ -1,6 +1,6 @@
 [project]
 name = "refund-review-agent"
-version = "1.4.2"
+version = "1.4.3"
 description = "AI agent that reviews e-commerce refund requests using tool use, RAG, human-in-the-loop approval, a REST API and an MCP server."
 readme = "README.md"
 requires-python = ">=3.11"
