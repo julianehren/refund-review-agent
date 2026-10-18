@@ -27,9 +27,11 @@ RUN python -c "from refund_agent.knowledge import PolicyIndex; PolicyIndex()"
 
 # Run as a normal user, not as root
 RUN useradd --create-home app && mkdir -p /app/state && chown -R app /app /opt/fastembed
-USER app
-
 COPY --chmod=755 docker/entrypoint.sh /usr/local/bin/entrypoint.sh
+# Safety net for Windows checkouts: remove Windows line endings (\r) from the start script
+RUN sed -i 's/\r$//' /usr/local/bin/entrypoint.sh
+
+USER app
 ENTRYPOINT ["entrypoint.sh"]
 
 EXPOSE 8000 8501

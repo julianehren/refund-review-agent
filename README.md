@@ -247,6 +247,7 @@ tests/                 # pytest suite with fake LLM client
 
 - **Integration tests find what unit tests miss.** n8n sends requests in parallel. The first parallel requests each tried to open the vector database at the same time and failed with HTTP 500. The unit tests ran sequentially and never hit it. I reproduced it with six concurrent threads, fixed it with a lock so the index is built exactly once, and added a regression test ([v1.1.1](https://github.com/julianehren/refund-review-agent/releases)).
 - **Two AIs checking each other.** Using the MCP server, Claude Desktop reviewed the review agent's output and spotted a leftover `</customer_reply>` tag in the draft customer reply. The decision model now strips such tags, with a regression test ([v1.3.1](https://github.com/julianehren/refund-review-agent/releases)).
+- **Works on my machine ≠ works on Windows.** The Docker setup was tested on Linux; on Windows, Git converted the container's start script to Windows line endings and the container failed with `exec entrypoint.sh: no such file or directory`. Fixed with `.gitattributes` (LF for shell scripts) plus a safety net in the Dockerfile ([v1.4.1](https://github.com/julianehren/refund-review-agent/releases)).
 - **Mocks have limits.** The tests use a fake Claude client, so a parameter the real API no longer accepted only surfaced when running against the real model. Both kinds of tests are needed.
 
 ## Roadmap

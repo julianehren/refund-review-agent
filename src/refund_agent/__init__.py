@@ -1,3 +1,3 @@
 """Refund Review Agent – an AI agent that reviews e-commerce refund requests."""
 
-__version__ = "1.4.0"
+__version__ = "1.4.1"

@@ -1,0 +1,4 @@
+# Shell scripts and Docker files must keep Linux line endings (LF), even when the
+# repository is checked out on Windows – otherwise the container cannot run them.
+*.sh        text eol=lf
+Dockerfile  text eol=lf
