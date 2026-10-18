@@ -8,6 +8,8 @@ An AI agent that reviews e-commerce refund requests the way an experienced custo
 
 > **Why this project?** I ran Amazon private-label brands for several years and handled refund, return and A-to-z claims by hand. This agent automates exactly that workflow – and the pattern *request → gather facts → retrieve rules → justified recommendation → human approval* transfers directly to card chargebacks in banking, insurance claims or AML alert triage.
 
+**▶ [Try the live demo](https://refund-review-agent.streamlit.app)** – no installation, no API key (replays recorded real agent runs, see [Online demo](#online-demo)).
+
 ![Review UI: the agent escalates a lost-parcel claim because of earlier "not received" claims](docs/review-ui.png)
 
 ## Results
@@ -16,10 +18,10 @@ Evaluated on 24 labelled cases with `claude-haiku-5-5`, repeated in **3 independ
 
 | Metric | Result |
 |---|---|
-| Correct decision (APPROVE / REJECT / ESCALATE) | **100 %** in all 3 runs |
-| Wrong approvals (money paid out wrongly) | **0** |
+| Correct final decision (APPROVE / REJECT / ESCALATE) | **100 %** in all 3 runs |
+| Wrong approvals (money paid out wrongly) | **0** – one wrong approval by the agent was caught by a [code guardrail](#lessons-learned) |
 | Decisive policy section cited | 100 % |
-| Citations grounded in retrieved sections | 96 % (1 case cited a section without retrieving it – flagged automatically) |
+| Citations grounded in retrieved sections | 97 % (2 of 72 reviews cited a section without retrieving it – flagged automatically) |
 | Cost per review | **≈ $0.002** (a full evaluation run costs ≈ $0.05) |
 | Latency per review | ≈ 8 s, ~9 tool calls |
 
@@ -75,11 +77,13 @@ flowchart LR
 | LLM evaluation, KPIs, cost & latency tracking | [`evals/run_eval.py`](evals/run_eval.py) |
 | SQL data modelling with constraints | [`schema.sql`](src/refund_agent/schema.sql) |
 | Testing (no API key needed) & CI/CD | [`tests/`](tests), [GitHub Actions](.github/workflows/ci.yml) |
+| Guardrails: hard rules enforced in code | [`guardrails.py`](src/refund_agent/guardrails.py) |
 | Containerization | [`Dockerfile`](Dockerfile), [`docker-compose.yml`](docker-compose.yml) |
+| Hosted demo (Streamlit Community Cloud) | [`demo.py`](src/refund_agent/demo.py), [live demo](https://refund-review-agent.streamlit.app) |
 
 ## Quickstart with Docker (recommended)
 
-Requirements: [Docker Desktop](https://www.docker.com/products/docker-desktop/) and an [Anthropic API key](https://console.anthropic.com).
+Requirements: [Docker Desktop](https://www.docker.com/products/docker-desktop/) and an [Anthropic API key](https://console.anthropic.com). Without a key everything still starts, and the UI runs in demo mode (recorded runs).
 
 ```bash
 git clone https://github.com/julianehren/refund-review-agent.git
@@ -96,6 +100,14 @@ docker compose up --build          # review UI + REST API
 | n8n *(optional: `docker compose --profile n8n up --build`)* | http://localhost:5678 |
 
 The first build takes a few minutes (it downloads the embedding model and builds the policy index into the image). The database lives in a Docker volume, so human decisions survive restarts; `docker compose down -v` resets everything. All ports are bound to `127.0.0.1`, so the services are only reachable from your own machine – the API has no login. In the n8n container, import [`refund-review-escalation-alerts.docker.json`](integrations/n8n/refund-review-escalation-alerts.docker.json), which calls the API as `http://api:8000`.
+
+## Online demo
+
+The [live demo](https://refund-review-agent.streamlit.app) runs on Streamlit Community Cloud. To keep it free and safe, it has **no API key**: clicking *Run agent* replays a **real recorded run** of the agent for that request (decision, cited policies, full tool trace, cost and latency), recorded with [`scripts/record_demo_results.py`](scripts/record_demo_results.py). Everything else is live: the queue, the human decision with the four-eyes rules and the audit log, in a shared demo database that visitors can reset.
+
+Demo mode switches on automatically when no `ANTHROPIC_API_KEY` is set (or with `REFUND_DEMO_MODE=1`). The demo installs only the lightweight [`app/requirements.txt`](app/requirements.txt) – no Claude SDK, no vector database.
+
+**Deploy your own:** [share.streamlit.io](https://share.streamlit.io) → *Create app* → this repository, branch `main`, main file `app/streamlit_app.py`.
 
 ## Quickstart without Docker
 
@@ -219,8 +231,11 @@ src/refund_agent/
 ├── api.py          # REST API (FastAPI) for other systems
 ├── mcp_server.py   # MCP server for Claude Desktop & other MCP clients
 ├── decisions.py    # human-in-the-loop rules, shared by UI and API
+├── guardrails.py   # hard rules checked in code after the agent decided
+├── demo.py         # demo mode: replay recorded agent runs
 ├── tools.py        # database tools (pure Python, reused by agent, API and later MCP)
-├── knowledge.py    # RAG: policy chunking, embeddings, Chroma search
+├── knowledge.py    # RAG: embeddings, Chroma search
+├── policy.py       # policy file → sections (no vector database needed)
 ├── models.py       # Pydantic models for decision, trace and result
 ├── seed.py         # synthetic shop data + 24 labelled cases
 ├── schema.sql      # SQLite schema
@@ -229,6 +244,7 @@ app/streamlit_app.py   # human-in-the-loop review UI
 integrations/n8n/      # n8n workflows (local and Docker variant)
 Dockerfile, docker-compose.yml   # one command starts UI, API (and optionally n8n)
 evals/run_eval.py      # evaluation & report
+scripts/record_demo_results.py   # records real agent runs for the online demo
 data/store_policy.md   # the refund policy (knowledge base)
 tests/                 # pytest suite with fake LLM client
 ```
@@ -238,6 +254,7 @@ tests/                 # pytest suite with fake LLM client
 - **Dates are computed in code, not by the LLM.** Tools return ready-made numbers such as `days_from_delivery_to_request`. LLMs are unreliable at counting days; Python is not.
 - **Tools don't know about the LLM.** `tools.py` contains plain functions plus JSON schemas. That is why the REST API and the MCP server could be added without touching the agent – all three use the same functions.
 - **Hand-written loop instead of LangChain.** For a single agent with five tools a framework adds more abstraction than value; writing the loop makes tool dispatch, error handling and token accounting explicit.
+- **Judgment in the LLM, hard thresholds in code.** Reading a customer message and deciding which rules apply is what the LLM is good at. A simple, expensive-to-miss rule such as "above 250 EUR always escalate" is additionally enforced in [`guardrails.py`](src/refund_agent/guardrails.py), so a missed search result can never turn into a wrong payout.
 - **"When in doubt, escalate".** The policy and prompt make ESCALATE the safe default. The evaluation tracks *wrong approvals* separately, because paying out money wrongly is the costliest error.
 - **Local embeddings.** No second API key, no data leaves the machine for retrieval, and the index rebuilds automatically when the policy file changes.
 - **Labels live outside the database** (`evals/labels.json`), so the agent can't access the expected answers.
@@ -248,6 +265,7 @@ tests/                 # pytest suite with fake LLM client
 - **Integration tests find what unit tests miss.** n8n sends requests in parallel. The first parallel requests each tried to open the vector database at the same time and failed with HTTP 500. The unit tests ran sequentially and never hit it. I reproduced it with six concurrent threads, fixed it with a lock so the index is built exactly once, and added a regression test ([v1.1.1](https://github.com/julianehren/refund-review-agent/releases)).
 - **Two AIs checking each other.** Using the MCP server, Claude Desktop reviewed the review agent's output and spotted a leftover `</customer_reply>` tag in the draft customer reply. The decision model now strips such tags, with a regression test ([v1.3.1](https://github.com/julianehren/refund-review-agent/releases)).
 - **Works on my machine ≠ works on Windows.** The Docker setup was tested on Linux; on Windows, Git converted the container's start script to Windows line endings and the container failed with `exec entrypoint.sh: no such file or directory`. Fixed with `.gitattributes` (LF for shell scripts) plus a safety net in the Dockerfile ([v1.4.1](https://github.com/julianehren/refund-review-agent/releases)).
+- **A 4th run found what 3 runs didn't.** While recording runs for the online demo, the agent approved a 349 EUR stand mixer (R-1013): its policy search had not returned §9 (above 250 EUR → four-eyes review). Three evaluation runs before had been perfect. Rather than tuning the prompt and hoping, I moved this threshold into a deterministic guardrail that overrides such approvals and is visible to the reviewer, added a regression test and re-ran the evaluation – where the guardrail caught the same miss once more ([v1.5](https://github.com/julianehren/refund-review-agent/releases)). In the demo, open R-1013 to see it. Lesson: LLM behaviour is a distribution – a perfect run is evidence, not proof.
 - **Mocks have limits.** The tests use a fake Claude client, so a parameter the real API no longer accepted only surfaced when running against the real model. Both kinds of tests are needed.
 
 ## Roadmap
@@ -257,7 +275,7 @@ tests/                 # pytest suite with fake LLM client
 - [x] **v1.2** – n8n workflow: agent review via the API, push notification to the reviewer on escalation
 - [x] **v1.3** – MCP server exposing the same tools to Claude Desktop and other MCP clients
 - [x] **v1.4** – Docker: one command starts UI, API and optionally n8n; CI builds and smoke-tests the image
-- [ ] **v1.5** – Hosted online demo
+- [x] **v1.5** – Hosted online demo (replays recorded runs) and a code guardrail for high-value approvals
 - [ ] Harder evaluation set: ambiguous messages, contradicting facts, prompt-injection attempts; model comparison Haiku vs. Sonnet
 - [ ] Ideas: prompt caching to cut cost, LLM-as-judge for the quality of customer replies
 
