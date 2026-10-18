@@ -176,6 +176,20 @@ Routine cases (APPROVE/REJECT) are not pushed: they wait in the review queue, so
 
 On macOS/Linux use `.venv/bin/python`. Restart Claude Desktop completely; the tools appear under *Connectors*. The server reads the API key from the project's `.env`.
 
+**Excerpt from a real session in Claude Desktop** (translated from German):
+
+> **User:** Look at R-1006 in detail: order, shipment, customer history. Which rule applies?
+>
+> **Claude:** Escalate under §6. DHL reports the parcel as delivered on 9 Oct, the customer says nothing arrived. […] Customer since July 2025, first order, first refund request – the §10 thresholds are far from reached, no warning signs. […] Recommendation for the senior reviewer: don't reject; start a carrier investigation and ask for proof of delivery.
+>
+> **User:** Get a second opinion from the review agent.
+>
+> **Claude:** The review agent reaches the same result: escalate under §6, high confidence. […] One thing stands out: its draft reply ends with a leftover formatting tag (`</customer_reply>`) that must be removed before sending.
+>
+> **User:** Record ESCALATE as my final decision.
+>
+> **Claude:** Done – R-1006 is recorded as ESCALATE and closed. Your decision matches the agent's recommendation.
+
 ## Project structure
 
 ```
@@ -210,6 +224,7 @@ tests/                 # pytest suite with fake LLM client
 ## Lessons learned
 
 - **Integration tests find what unit tests miss.** n8n sends requests in parallel. The first parallel requests each tried to open the vector database at the same time and failed with HTTP 500. The unit tests ran sequentially and never hit it. I reproduced it with six concurrent threads, fixed it with a lock so the index is built exactly once, and added a regression test ([v1.1.1](https://github.com/julianehren/refund-review-agent/releases)).
+- **Two AIs checking each other.** Using the MCP server, Claude Desktop reviewed the review agent's output and spotted a leftover `</customer_reply>` tag in the draft customer reply. The decision model now strips such tags, with a regression test ([v1.3.1](https://github.com/julianehren/refund-review-agent/releases)).
 - **Mocks have limits.** The tests use a fake Claude client, so a parameter the real API no longer accepted only surfaced when running against the real model. Both kinds of tests are needed.
 
 ## Roadmap

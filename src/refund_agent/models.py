@@ -5,11 +5,15 @@ RefundDecision (e.g. decision="MAYBE"), validation fails and the agent is
 asked to correct itself. This is what "structured output" means in practice.
 """
 
+import re
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 DecisionType = Literal["APPROVE", "REJECT", "ESCALATE"]
+
+# Leftover XML-style tags the model sometimes writes into text fields, e.g. "</customer_reply>"
+_STRAY_TAG = re.compile(r"</?[a-z_]+>")
 
 
 class RefundDecision(BaseModel):
@@ -22,6 +26,17 @@ class RefundDecision(BaseModel):
     key_facts: list[str] = Field(description="The facts from the tools that the decision is based on")
     cited_policies: list[str] = Field(description="Policy section ids the decision relies on, e.g. ['§5', '§13']")
     customer_reply: str = Field(description="A short, friendly draft reply to the customer")
+
+    @field_validator("summary", "customer_reply")
+    @classmethod
+    def remove_stray_tags(cls, text: str) -> str:
+        """Strip leftover tags such as '</customer_reply>' so they never reach a customer."""
+        return _STRAY_TAG.sub("", text).strip()
+
+    @field_validator("key_facts")
+    @classmethod
+    def remove_stray_tags_from_facts(cls, facts: list[str]) -> list[str]:
+        return [_STRAY_TAG.sub("", fact).strip() for fact in facts]
 
 
 class ToolCall(BaseModel):
