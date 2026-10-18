@@ -75,8 +75,29 @@ flowchart LR
 | LLM evaluation, KPIs, cost & latency tracking | [`evals/run_eval.py`](evals/run_eval.py) |
 | SQL data modelling with constraints | [`schema.sql`](src/refund_agent/schema.sql) |
 | Testing (no API key needed) & CI/CD | [`tests/`](tests), [GitHub Actions](.github/workflows/ci.yml) |
+| Containerization | [`Dockerfile`](Dockerfile), [`docker-compose.yml`](docker-compose.yml) |
 
-## Quickstart
+## Quickstart with Docker (recommended)
+
+Requirements: [Docker Desktop](https://www.docker.com/products/docker-desktop/) and an [Anthropic API key](https://console.anthropic.com).
+
+```bash
+git clone https://github.com/julianehren/refund-review-agent.git
+cd refund-review-agent
+cp .env.example .env               # Windows: copy .env.example .env  – then paste your API key into .env
+
+docker compose up --build          # review UI + REST API
+```
+
+| Service | URL |
+|---|---|
+| Review UI (Streamlit) | http://localhost:8501 |
+| REST API + interactive docs | http://localhost:8000/docs |
+| n8n *(optional: `docker compose --profile n8n up --build`)* | http://localhost:5678 |
+
+The first build takes a few minutes (it downloads the embedding model and builds the policy index into the image). The database lives in a Docker volume, so human decisions survive restarts; `docker compose down -v` resets everything. All ports are bound to `127.0.0.1`, so the services are only reachable from your own machine – the API has no login. In the n8n container, import [`refund-review-escalation-alerts.docker.json`](integrations/n8n/refund-review-escalation-alerts.docker.json), which calls the API as `http://api:8000`.
+
+## Quickstart without Docker
 
 Requirements: Python 3.11+ and an [Anthropic API key](https://console.anthropic.com) (a full evaluation run with Haiku costs a few cents).
 
@@ -205,7 +226,8 @@ src/refund_agent/
 ├── schema.sql      # SQLite schema
 └── config.py       # paths, model, prices, simulation date
 app/streamlit_app.py   # human-in-the-loop review UI
-integrations/n8n/      # n8n workflow (escalation alerts)
+integrations/n8n/      # n8n workflows (local and Docker variant)
+Dockerfile, docker-compose.yml   # one command starts UI, API (and optionally n8n)
 evals/run_eval.py      # evaluation & report
 data/store_policy.md   # the refund policy (knowledge base)
 tests/                 # pytest suite with fake LLM client
@@ -233,7 +255,8 @@ tests/                 # pytest suite with fake LLM client
 - [x] **v1.1** – REST API with FastAPI, so other systems can call the agent and record human decisions
 - [x] **v1.2** – n8n workflow: agent review via the API, push notification to the reviewer on escalation
 - [x] **v1.3** – MCP server exposing the same tools to Claude Desktop and other MCP clients
-- [ ] **v1.4** – Docker image and hosted demo
+- [x] **v1.4** – Docker: one command starts UI, API and optionally n8n; CI builds and smoke-tests the image
+- [ ] **v1.5** – Hosted online demo
 - [ ] Harder evaluation set: ambiguous messages, contradicting facts, prompt-injection attempts; model comparison Haiku vs. Sonnet
 - [ ] Ideas: prompt caching to cut cost, LLM-as-judge for the quality of customer replies
 
