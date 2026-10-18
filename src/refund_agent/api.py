@@ -25,6 +25,7 @@ from typing import Annotated, Literal
 
 import anthropic
 from fastapi import Depends, FastAPI, HTTPException, Query
+from fastapi.responses import RedirectResponse
 from pydantic import BaseModel, Field
 
 from refund_agent import __version__, config, db, tools
@@ -95,6 +96,12 @@ class RequestSummary(BaseModel):
 
 
 # --- Endpoints ------------------------------------------------------------------------
+
+@app.get("/", include_in_schema=False)
+def root() -> RedirectResponse:
+    """Opening the bare address (e.g. from Docker Desktop) leads to the interactive docs."""
+    return RedirectResponse("/docs")
+
 
 @app.get("/health", tags=["system"])
 def health() -> dict:
