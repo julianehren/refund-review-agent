@@ -5,9 +5,16 @@
 #   n8n (optional)         http://localhost:5678   ->  docker compose --profile n8n up --build
 #
 # Your ANTHROPIC_API_KEY is read from the .env file in this folder.
+#
+# Container names say which technology runs inside (shown in Docker Desktop).
+# The short service names (api, ui, n8n) stay unchanged: containers reach each
+# other through them, e.g. n8n calls the API at http://api:8000.
+
+name: refund-review-agent   # fixed project name instead of the folder name
 
 services:
   api:
+    container_name: refund-review-api-fastapi
     build: .
     image: refund-review-agent
     env_file:
@@ -24,6 +31,7 @@ services:
       retries: 5
 
   ui:
+    container_name: refund-review-ui-streamlit
     image: refund-review-agent
     pull_policy: never           # built locally by the api service, never pulled from Docker Hub
     depends_on:
@@ -39,6 +47,7 @@ services:
       - "127.0.0.1:8501:8501"
 
   n8n:
+    container_name: refund-review-n8n
     image: n8nio/n8n:latest
     profiles: ["n8n"]           # only started with: docker compose --profile n8n up
     environment:
