@@ -1,0 +1,53 @@
+# Start everything with one command:   docker compose up --build
+#
+#   Review UI (Streamlit)  http://localhost:8501
+#   REST API + docs        http://localhost:8000/docs
+#   n8n (optional)         http://localhost:5678   ->  docker compose --profile n8n up --build
+#
+# Your ANTHROPIC_API_KEY is read from the .env file in this folder.
+
+services:
+  api:
+    build: .
+    image: refund-review-agent
+    env_file:
+      - path: .env
+        required: false
+    volumes:
+      - state:/app/state
+    ports:
+      - "127.0.0.1:8000:8000"   # only reachable from this computer – the API has no login
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  ui:
+    image: refund-review-agent
+    depends_on:
+      api:
+        condition: service_healthy   # the api container creates the database on first start
+    command: ["streamlit", "run", "app/streamlit_app.py", "--server.address=0.0.0.0", "--server.port=8501", "--server.headless=true"]
+    env_file:
+      - path: .env
+        required: false
+    volumes:
+      - state:/app/state
+    ports:
+      - "127.0.0.1:8501:8501"
+
+  n8n:
+    image: n8nio/n8n:latest
+    profiles: ["n8n"]           # only started with: docker compose --profile n8n up
+    ports:
+      - "127.0.0.1:5678:5678"
+    volumes:
+      - n8n_data:/home/node/.n8n
+    depends_on:
+      api:
+        condition: service_healthy
+
+volumes:
+  state:      # SQLite database incl. human decisions
+  n8n_data:   # n8n workflows and settings
