@@ -28,6 +28,17 @@ from refund_agent.policy import load_policy_sections  # noqa: E402
 REPO_URL = "https://github.com/julianehren/refund-review-agent"
 DEMO = is_demo_mode()
 
+# Guided tour for the online demo: three cases that show the most interesting behaviour
+TOUR = [
+    ("R-1003", "✅ Clear approval", "Parcel arrived damaged, photo attached"),
+    ("R-1015", "⚠️ Suspicious history", "Lost parcel, but 2 earlier \"not received\" claims"),
+    ("R-1013", "🛡️ Guardrail", "Agent approves 349 €, code enforces four-eyes review"),
+]
+
+
+def select_request(request_id: str) -> None:
+    st.session_state.selected_request = request_id
+
 st.set_page_config(page_title="Refund Review Agent", page_icon="🧾", layout="wide")
 
 DECISION_STYLE = {"APPROVE": ("✅", "green"), "REJECT": ("⛔", "red"), "ESCALATE": ("⚠️", "orange")}
@@ -120,11 +131,20 @@ if DEMO:
         icon="👋",
     )
 
+    open_ids = {r["id"] for r in conn.execute("SELECT id FROM refund_requests WHERE status = 'open'")}
+    st.markdown("**Try these three cases:**")
+    for column, (tour_id, title, hint) in zip(st.columns(len(TOUR)), TOUR):
+        with column:
+            st.button(f"{title} · {tour_id}", key=f"tour_{tour_id}", on_click=select_request, args=(tour_id,),
+                      disabled=tour_id not in open_ids, use_container_width=True,
+                      help=None if tour_id in open_ids else "Already decided – use 'Reset demo data' in the sidebar")
+            st.caption(hint)
+
 if "flash" in st.session_state:
     st.success(st.session_state.pop("flash"))
 
 st.title(f"Refund request {request_id}")
-col1, col2, col3, col4 = st.columns(4)
+col1, col2, col3, col4 = st.columns([1.5, 1, 1, 0.7])
 col1.metric("Reason", REASON_LABELS[request["reason"]])
 col2.metric("Amount", f"{request['amount_requested']:.2f} €")
 col3.metric("Submitted", request["submitted_at"])

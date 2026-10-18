@@ -4,13 +4,27 @@
 ![Python](https://img.shields.io/badge/python-3.11%2B-blue)
 ![License: MIT](https://img.shields.io/badge/license-MIT-green)
 
-An AI agent that reviews e-commerce refund requests the way an experienced customer-service agent would: it **looks up the facts itself** (order, shipment, customer history), **retrieves the applicable rules** from the shop's refund policy via RAG, and **recommends APPROVE, REJECT or ESCALATE** with a cited justification. A **human makes the final call** in a review UI, and every run is **measured** against labelled test cases.
+**An AI agent that reviews e-commerce refund requests – and a human who makes the final call.**
+
+The agent looks up the facts itself, retrieves the applicable rules from the refund policy (RAG) and recommends **APPROVE, REJECT or ESCALATE** with a cited justification. A reviewer accepts or overrides it, and every run is measured against labelled test cases.
+
+<p align="center">
+  <a href="https://refund-review-agent.streamlit.app"><b>▶ Try the live demo</b></a> &nbsp;·&nbsp; no installation, no API key
+</p>
+
+![Demo: the agent reviews a 349 € refund, a code guardrail escalates it, a human records the decision](docs/demo.gif)
+
+| Building block | What it does |
+|---|---|
+| 🤖 **Agent with tool use** | Claude decides which database lookups it needs – hand-written loop, no framework |
+| 📚 **RAG** | Semantic search over the refund policy (local embeddings + Chroma), every decision cites its rules |
+| 👤 **Human-in-the-loop** | Review UI with four-eyes rules and audit log |
+| 🛡️ **Guardrails** | Hard thresholds are enforced in code, not left to the LLM |
+| 📊 **Evaluation** | 24 labelled cases, accuracy, wrong approvals, cost and latency per review |
+| 🔌 **Integrations** | REST API (FastAPI), n8n workflow with push alerts, MCP server for Claude Desktop |
+| 🐳 **Engineering** | Docker, 50+ tests without API key, CI on every push, versioned releases |
 
 > **Why this project?** I ran Amazon private-label brands for several years and handled refund, return and A-to-z claims by hand. This agent automates exactly that workflow – and the pattern *request → gather facts → retrieve rules → justified recommendation → human approval* transfers directly to card chargebacks in banking, insurance claims or AML alert triage.
-
-**▶ [Try the live demo](https://refund-review-agent.streamlit.app)** – no installation, no API key (replays recorded real agent runs, see [Online demo](#online-demo)).
-
-![Review UI: the agent escalates a lost-parcel claim because of earlier "not received" claims](docs/review-ui.png)
 
 ## Results
 
@@ -65,6 +79,9 @@ flowchart LR
 
 ## What it shows
 
+<details>
+<summary>Where each concept lives in the code</summary>
+
 | Concept | Where |
 |---|---|
 | Agentic workflow / tool use / function calling | [`agent.py`](src/refund_agent/agent.py), [`tools.py`](src/refund_agent/tools.py) |
@@ -80,6 +97,16 @@ flowchart LR
 | Guardrails: hard rules enforced in code | [`guardrails.py`](src/refund_agent/guardrails.py) |
 | Containerization | [`Dockerfile`](Dockerfile), [`docker-compose.yml`](docker-compose.yml) |
 | Hosted demo (Streamlit Community Cloud) | [`demo.py`](src/refund_agent/demo.py), [live demo](https://refund-review-agent.streamlit.app) |
+
+</details>
+
+## Online demo
+
+The [live demo](https://refund-review-agent.streamlit.app) runs on Streamlit Community Cloud. To keep it free and safe, it has **no API key**: clicking *Run agent* replays a **real recorded run** of the agent for that request (decision, cited policies, full tool trace, cost and latency), recorded with [`scripts/record_demo_results.py`](scripts/record_demo_results.py). Everything else is live: the queue, the human decision with the four-eyes rules and the audit log, in a shared demo database that visitors can reset.
+
+Demo mode switches on automatically when no `ANTHROPIC_API_KEY` is set (or with `REFUND_DEMO_MODE=1`). The demo installs only the lightweight [`app/requirements.txt`](app/requirements.txt) – no Claude SDK, no vector database.
+
+**Deploy your own:** [share.streamlit.io](https://share.streamlit.io) → *Create app* → this repository, branch `main`, main file `app/streamlit_app.py`.
 
 ## Quickstart with Docker (recommended)
 
@@ -101,15 +128,10 @@ docker compose up --build          # review UI + REST API
 
 The first build takes a few minutes (it downloads the embedding model and builds the policy index into the image). The database lives in a Docker volume, so human decisions survive restarts; `docker compose down -v` resets everything. All ports are bound to `127.0.0.1`, so the services are only reachable from your own machine – the API has no login. In the n8n container, import [`refund-review-escalation-alerts.docker.json`](integrations/n8n/refund-review-escalation-alerts.docker.json), which calls the API as `http://api:8000`.
 
-## Online demo
-
-The [live demo](https://refund-review-agent.streamlit.app) runs on Streamlit Community Cloud. To keep it free and safe, it has **no API key**: clicking *Run agent* replays a **real recorded run** of the agent for that request (decision, cited policies, full tool trace, cost and latency), recorded with [`scripts/record_demo_results.py`](scripts/record_demo_results.py). Everything else is live: the queue, the human decision with the four-eyes rules and the audit log, in a shared demo database that visitors can reset.
-
-Demo mode switches on automatically when no `ANTHROPIC_API_KEY` is set (or with `REFUND_DEMO_MODE=1`). The demo installs only the lightweight [`app/requirements.txt`](app/requirements.txt) – no Claude SDK, no vector database.
-
-**Deploy your own:** [share.streamlit.io](https://share.streamlit.io) → *Create app* → this repository, branch `main`, main file `app/streamlit_app.py`.
-
 ## Quickstart without Docker
+
+<details>
+<summary>Python setup (venv, pip) and command-line usage</summary>
 
 Requirements: Python 3.11+ and an [Anthropic API key](https://console.anthropic.com) (a full evaluation run with Haiku costs a few cents).
 
@@ -140,7 +162,12 @@ python scripts/try_rag.py "parcel never arrived"   # try the policy search
 
 The first start downloads the embedding model (~130 MB) once.
 
+</details>
+
 ## REST API
+
+<details>
+<summary>Endpoints and curl examples</summary>
 
 Start the server with `uvicorn refund_agent.api:app --reload` and open **http://localhost:8000/docs** – FastAPI generates an interactive page where every endpoint can be tried out in the browser.
 
@@ -165,7 +192,12 @@ On Windows PowerShell use `curl.exe` instead of `curl`, or `Invoke-RestMethod`.
 
 The API adds no business logic of its own – it calls the same tools, agent and decision rules as the UI.
 
+</details>
+
 ## n8n workflow
+
+<details>
+<summary>Workflow: agent review via the API, push notification on escalation</summary>
 
 ![n8n workflow: get open requests, AI agent review via the API, notify a human only on escalation](docs/n8n-workflow.png)
 
@@ -180,7 +212,12 @@ Routine cases (APPROVE/REJECT) are not pushed: they wait in the review queue, so
 
 **Run it:** start the API (`uvicorn refund_agent.api:app`), start n8n (`npx n8n`), import the JSON file (*Workflows → Import from file*), replace `YOUR-NTFY-TOPIC` in the last node and click *Execute workflow*. The limit node keeps test runs small and cheap – remove it to review all open requests. Use `127.0.0.1` rather than `localhost` in n8n (Node.js may resolve `localhost` to IPv6, while uvicorn listens on IPv4).
 
+</details>
+
 ## MCP server (Claude Desktop)
+
+<details>
+<summary>Tools, Claude Desktop setup and a real session excerpt</summary>
 
 [`mcp_server.py`](src/refund_agent/mcp_server.py) exposes the shop to any MCP client. In Claude Desktop you can then simply ask:
 
@@ -223,7 +260,12 @@ On macOS/Linux use `.venv/bin/python`. Restart Claude Desktop completely; the to
 >
 > **Claude:** Done – R-1006 is recorded as ESCALATE and closed. Your decision matches the agent's recommendation.
 
+</details>
+
 ## Project structure
+
+<details>
+<summary>Folder overview</summary>
 
 ```
 src/refund_agent/
@@ -248,6 +290,8 @@ scripts/record_demo_results.py   # records real agent runs for the online demo
 data/store_policy.md   # the refund policy (knowledge base)
 tests/                 # pytest suite with fake LLM client
 ```
+
+</details>
 
 ## Design decisions
 
@@ -276,6 +320,7 @@ tests/                 # pytest suite with fake LLM client
 - [x] **v1.3** – MCP server exposing the same tools to Claude Desktop and other MCP clients
 - [x] **v1.4** – Docker: one command starts UI, API and optionally n8n; CI builds and smoke-tests the image
 - [x] **v1.5** – Hosted online demo (replays recorded runs) and a code guardrail for high-value approvals
+- [x] **v1.6** – Guided demo tour, animated README preview, pinned demo dependencies
 - [ ] Harder evaluation set: ambiguous messages, contradicting facts, prompt-injection attempts; model comparison Haiku vs. Sonnet
 - [ ] Ideas: prompt caching to cut cost, LLM-as-judge for the quality of customer replies
 
