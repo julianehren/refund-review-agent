@@ -1,7 +1,8 @@
-# Lightweight dependencies for the hosted online demo (Streamlit Community Cloud).
+# Dependencies for the hosted online demo (Streamlit Community Cloud).
 # The demo replays recorded agent runs, so it needs no Claude SDK and no vector database.
+# Versions are pinned so the live demo does not break when a new release changes something.
 # For the full project use:  pip install -e .
-streamlit>=1.40
-pandas>=2.0
-pydantic>=2.7
-python-dotenv>=1.0
+streamlit==1.66.0
+pandas==3.0.6
+pydantic==2.14.1
+python-dotenv==1.2.4
