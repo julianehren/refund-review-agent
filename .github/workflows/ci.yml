@@ -23,3 +23,19 @@ jobs:
       # so no API key and no model download are needed.
       - name: Run tests
         run: pytest -v
+
+  docker:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Builds the image (incl. embedding model and policy index) to make sure the Dockerfile works.
+      # Nothing is pushed anywhere.
+      - name: Build Docker image
+        run: docker build -t refund-review-agent .
+
+      - name: Smoke test
+        run: |
+          docker run -d --name api -p 8000:8000 refund-review-agent
+          for i in $(seq 1 30); do curl -sf localhost:8000/health && break; sleep 2; done
+          curl -sf localhost:8000/requests | python3 -c "import sys, json; assert len(json.load(sys.stdin)) == 24"

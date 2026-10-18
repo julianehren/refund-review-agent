@@ -40,6 +40,8 @@ services:
   n8n:
     image: n8nio/n8n:latest
     profiles: ["n8n"]           # only started with: docker compose --profile n8n up
+    environment:
+      N8N_LISTEN_ADDRESS: 0.0.0.0   # n8n defaults to IPv6 (::), which is not available in every Docker setup
     ports:
       - "127.0.0.1:5678:5678"
     volumes:
