@@ -24,7 +24,7 @@ The agent looks up the facts itself, retrieves the applicable rules from the ref
 | 🔌 **Integrations** | REST API (FastAPI), n8n workflow with push alerts, MCP server for Claude Desktop |
 | 🐳 **Engineering** | Docker, 50+ tests without API key, CI on every push, versioned releases |
 
-> **Why this project?** I ran Amazon private-label brands for several years and handled refund, return and A-to-z claims by hand. This agent automates exactly that workflow – and the pattern *request → gather facts → retrieve rules → justified recommendation → human approval* transfers directly to card chargebacks in banking, insurance claims or AML alert triage.
+> **Why this project?** I spent several years building Amazon private-label brands, so I know refunds and returns from the seller's side. This agent automates the review step of that workflow – and the pattern *request → gather facts → retrieve rules → justified recommendation → human approval* transfers directly to card chargebacks in banking, insurance claims or AML alert triage.
 
 ## Results
 
